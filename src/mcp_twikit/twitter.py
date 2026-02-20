@@ -1,5 +1,7 @@
 from fastmcp import FastMCP, Context
 import twikit
+from twikit.tweet import Tweet, tweet_from_data
+from twikit.utils import find_dict
 import os
 from pathlib import Path
 import logging
@@ -133,12 +135,21 @@ async def get_tweet_detail(tweet_id_or_url: str) -> str:
     try:
         client = await get_twitter_client()
         tweet_id = extract_tweet_id(tweet_id_or_url)
-        tweet = await client.get_tweet_by_id(tweet_id)
-        if tweet is None:
-            return f"Tweet {tweet_id} not found (deleted or unavailable)."
-        return convert_tweets_to_markdown([tweet])
-    except KeyError as e:
-        return f"Tweet {extract_tweet_id(tweet_id_or_url)} not found (deleted or unavailable). Raw: {e}"
+        # Bypass client.get_tweet_by_id which has a bug parsing cursor entries.
+        # Fetch raw GraphQL response and extract the target tweet only.
+        response, _ = await client.gql.tweet_detail(tweet_id, None)
+        if 'errors' in response:
+            return f"Tweet {tweet_id} not available: {response['errors'][0]['message']}"
+        entries = find_dict(response, 'entries', find_one=True)
+        if not entries:
+            return f"Tweet {tweet_id} not found (no entries in response)."
+        for entry in entries[0]:
+            if entry.get('entryId') == f'tweet-{tweet_id}':
+                tweet = tweet_from_data(client, entry)
+                if tweet is None:
+                    return f"Tweet {tweet_id} not found (deleted or unavailable)."
+                return convert_tweets_to_markdown([tweet])
+        return f"Tweet {tweet_id} not found in response entries."
     except Exception as e:
         logger.error(f"Failed to get tweet detail: {e}")
         return f"Failed to get tweet detail: {e}"
