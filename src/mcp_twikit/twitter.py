@@ -5,6 +5,7 @@ from pathlib import Path
 import logging
 from typing import Optional, List
 import time
+import re
 
 # Create an MCP server
 mcp = FastMCP("mcp-twikit")
@@ -113,7 +114,33 @@ async def get_latest_timeline(count: int = 20) -> str:
         logger.error(f"Failed to get latest timeline: {e}")
         return f"Failed to get latest timeline: {e}"
 
-# New write tools
+TWEET_URL_PATTERN = re.compile(
+    r'(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/\w+/status/(\d+)'
+)
+
+
+def extract_tweet_id(tweet_id_or_url: str) -> str:
+    """Extract tweet ID from a URL or return as-is if already an ID."""
+    match = TWEET_URL_PATTERN.search(tweet_id_or_url)
+    if match:
+        return match.group(1)
+    return tweet_id_or_url.strip()
+
+
+@mcp.tool()
+async def get_tweet_detail(tweet_id_or_url: str) -> str:
+    """Get tweet content by tweet ID or tweet URL (e.g. https://x.com/user/status/123456)."""
+    try:
+        client = await get_twitter_client()
+        tweet_id = extract_tweet_id(tweet_id_or_url)
+        tweet = await client.get_tweet_by_id(tweet_id)
+        return convert_tweets_to_markdown([tweet])
+    except Exception as e:
+        logger.error(f"Failed to get tweet detail: {e}")
+        return f"Failed to get tweet detail: {e}"
+
+
+# Write tools
 @mcp.tool()
 async def post_tweet(
     text: str,
